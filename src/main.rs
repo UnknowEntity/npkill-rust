@@ -86,6 +86,10 @@ fn get_current_time() -> u64 {
     
 }
 
+fn get_duration_human_time(start_ms: u64, end_ms: u64) -> String {
+    format_duration(Duration::from_millis(end_ms - start_ms)).to_string()
+}
+
 fn main() {
     let start_ms = get_current_time();
     let current_path = env::current_dir();
@@ -109,5 +113,5 @@ fn main() {
 
     let end_ms = get_current_time();
 
-    println!("Time Run: {}", format_duration(Duration::from_millis(end_ms - start_ms)).to_string())
+    println!("Time Run: {}", get_duration_human_time(start_ms, end_ms))
 }
