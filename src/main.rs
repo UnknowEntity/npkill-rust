@@ -1,8 +1,10 @@
 mod app;
+mod ui;
 
 use fs_extra;
 use rayon;
-use std::{time::Duration, sync::{Arc, Mutex}};
+use tui::widgets::TableState;
+use std::{time::Duration, sync::{Arc, Mutex}, fmt};
 use humantime::format_duration;
 use std::{env, path::Path, sync::mpsc::{Sender, self, Receiver}, fs::DirEntry, time::{SystemTime, UNIX_EPOCH}};
 
@@ -91,18 +93,56 @@ fn get_duration_human_time(start_ms: u64, end_ms: u64) -> String {
     format_duration(Duration::from_millis(end_ms - start_ms)).to_string()
 }
 
+pub enum DirStatus {
+    Loading,
+    Ready,
+    Deleting,
+    Deleted,
+    Error,
+}
+
+impl fmt::Display for DirStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DirStatus::Loading => write!(f, "LOADING"),
+            DirStatus::Ready => write!(f, "READY"),
+            DirStatus::Deleting => write!(f, "DELETING"),
+            DirStatus::Deleted => write!(f, "DELETED"),
+            DirStatus::Error => write!(f, "ERROR"),
+        }
+    }
+}
+
 struct NodeModulePath {
     bytes: Option<u64>,
     path: String,
+    status: DirStatus,
 }
 
 impl NodeModulePath {
     fn new(path: String) -> NodeModulePath {
-        NodeModulePath { bytes: None, path }
+        NodeModulePath { bytes: None, path, status: DirStatus::Loading }
     }
 
     fn update_size(&mut self, byte: u64) {
         self.bytes = Some(byte);
+        self.status = DirStatus::Ready;
+    }
+
+    fn deleting(&mut self) {
+        self.status = DirStatus::Deleting;
+    }
+
+    fn deleted(&mut self) -> u64 {
+        self.status = DirStatus::Deleted;
+        match self.bytes {
+            Some(value) => value,
+            None => 0,
+        }
+    }
+
+    fn error(&mut self) {
+        self.status = DirStatus::Error;
     }
 
     fn get_size(&self) -> String {
@@ -114,12 +154,17 @@ impl NodeModulePath {
 }
 
 pub struct Data {
-    items: Vec<NodeModulePath>
+    items: Vec<NodeModulePath>,
+    state: TableState,
+    data_free: u64,
+    data_contain: u64,
+    start_timestamp: u64,
+    end_timestamp: Option<u64>,
 }
 
 impl Data {
     fn new() -> Data {
-        Data { items: vec![] }
+        Data { items: vec![], state: TableState::default(), data_free: 0, data_contain: 0, start_timestamp: get_current_time(), end_timestamp: None }
     }
 
     fn add_path(&mut self, path: String) -> usize {
@@ -131,21 +176,69 @@ impl Data {
     fn update_size(&mut self, index: usize, byte: u64) {
         if let Some(value) = self.items.get_mut(index) {
             value.update_size(byte);
+            self.data_contain += byte;
         }
+    }
+
+    fn get_free_space(&self) -> String {
+        size::Size::from_bytes(self.data_free).to_string()
+    }
+
+    fn get_available_space(&self) -> String {
+        size::Size::from_bytes(self.data_contain).to_string()
+    }
+
+    fn finish_search(&mut self) {
+        self.end_timestamp = Some(get_current_time());
+    }
+
+    fn get_search_duration(&self) -> String {
+        match self.end_timestamp {
+            None => "__".to_owned(),
+            Some(value) => get_duration_human_time(self.start_timestamp, value)
+        }
+    }
+
+    fn next(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.items.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+
+    fn previous(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.items.len() - 1
+                } else {
+                    i - 1
+                } 
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
     }
 }
 
 fn main() {
     let start_ms = get_current_time();
-    let current_path = env::current_dir();
-    // let current_path: Result<&std::path::Path, ()> = Ok(Path::new("D:\\projects"));
+    // let current_path = env::current_dir();
+    let current_path: Result<&std::path::Path, ()> = Ok(Path::new("D:\\personal-projects\\nodejs"));
     let data = Arc::new(Mutex::new(Data::new()));
     let share_data = data.clone();
     rayon::scope(move |s| {
         let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
         match current_path {
             Err(err) => {
-                println!("{err}");
+                // println!("{err}");
                 return;
             },
             Ok(path) => {
@@ -158,19 +251,24 @@ fn main() {
         };
         drop(tx);
         s.spawn(move |_| {
-            rayon::scope(move |s| {
+            rayon::scope(move |t| {
                 for receiver in rx.into_iter() {
                     if let Ok(mut data_lock) = share_data.lock() {
                         let index = data_lock.add_path(receiver.clone());
                         let data_clone = share_data.clone();
                         drop(data_lock);
-                        s.spawn(move |_| {
+                        t.spawn(move |_| {
                             let bytes = get_dir_size(&receiver);
                             if let Ok(mut data_lock) = data_clone.lock() {
                                 data_lock.update_size(index, bytes);
                             }
                         });
                     }
+                }
+
+                if let Ok(mut data_lock) = share_data.lock() {
+                    data_lock.finish_search();
+                    drop(data_lock);
                 }
             })
         });

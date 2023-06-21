@@ -1,15 +1,28 @@
-use std::{io::{stdout, Result}, sync::{mpsc::{self, Sender, Receiver}, Mutex, Arc}, thread, time::Duration};
+use std::{io::{stdout, Result}, sync::{mpsc::{self, Sender, Receiver}, Mutex, Arc}, time::Duration};
 
 use crossterm::event::{self, KeyCode};
 use tui::{backend::{CrosstermBackend, Backend}, Terminal, Frame, layout::{Layout, Direction, Constraint, Rect}, widgets::{Borders, Table, Row, Cell, Block}, style::{Style, Color, Modifier}};
 
-use crate::NodeModulePath;
+use crate::{NodeModulePath, ui::{title, version_block, guideline, status_block}, DirStatus};
 
 use super::Data;
 
 enum InputEvent {
     Quit,
+    Up,
+    Down,
+    Select,
     Tick,
+}
+
+fn map_input_to_event(input_code: &KeyCode) -> Option<InputEvent> {
+    match input_code {
+        KeyCode::Char('q') => Some(InputEvent::Quit),
+        KeyCode::Up => Some(InputEvent::Up),
+        KeyCode::Down => Some(InputEvent::Down),
+        KeyCode::Char(' ') => Some(InputEvent::Select),
+        _ => None
+    }
 }
 
 pub fn start_ui(data: Arc<Mutex<Data>>) -> Result<()> {
@@ -24,10 +37,9 @@ pub fn start_ui(data: Arc<Mutex<Data>>) -> Result<()> {
     let (tx, rx): (Sender<InputEvent>, Receiver<InputEvent>) = mpsc::channel();
 
     let event_tx = tx.clone();
-        thread::spawn(move || {
+        rayon::spawn(move || {
             loop {
-                // println!("loop");
-                let crossterm_event = match crossterm::event::poll(Duration::from_millis(200)) {
+                let crossterm_event = match crossterm::event::poll(Duration::from_millis(1000)) {
                     Ok(result) => result,
                     Err(err) => {
                         println!("{err}");
@@ -36,26 +48,25 @@ pub fn start_ui(data: Arc<Mutex<Data>>) -> Result<()> {
                 };
                 if crossterm_event {
                     if let event::Event::Key(key) = event::read().unwrap() {
-                        if KeyCode::Char('q') == key.code {
-                            if let Err(err) = event_tx.send(InputEvent::Quit) {
+                        if let Some(input_event) = map_input_to_event(&key.code) {
+                            if let Err(err) = event_tx.send(input_event) {
                                 println!("{err}");
+                                break;
                             }
-                            break;
                         }
                     }
                 }
-                if let Err(err) = event_tx.send(InputEvent::Tick) {
-                    println!("{err}");
-                    break;
+
+                match event_tx.send(InputEvent::Tick) {
+                    Err(_) => break,
+                    _ => {}
                 }
-                
             }
         });
 
     drop(tx);
     loop {
-        // println!("drawn");
-        let data_lock = match data.lock() {
+        let mut data_lock = match data.lock() {
             Ok(data) => data,
             Err(err) => {
                 println!("{err}");
@@ -63,14 +74,26 @@ pub fn start_ui(data: Arc<Mutex<Data>>) -> Result<()> {
             }
         };
         // Render
-        terminal.draw(|rect| draw(rect, &data_lock))?;
+        terminal.draw(|rect| draw(rect, &mut data_lock))?;
+        
         drop(data_lock);
         // TODO handle inputs here
         if let Ok(input_event) = rx.recv() {
+            let mut data_event = match data.lock() {
+                Ok(data) => data,
+                Err(err) => {
+                    println!("{err}");
+                    break;
+                }
+            };
             match input_event {
                 InputEvent::Quit => break,
-                InputEvent::Tick => continue,
+                InputEvent::Tick => {},
+                InputEvent::Up => data_event.previous(),
+                InputEvent::Down => data_event.next(),
+                InputEvent::Select => {},
             }
+            drop(data_event);
         }
     }
 
@@ -92,7 +115,7 @@ fn check_size(rect: &Rect) {
 }
 
 
-pub fn draw<B>(rect: &mut Frame<B>, data: &Data)
+pub fn draw<B>(rect: &mut Frame<B>, data: &mut Data)
 where
     B: Backend,
 {
@@ -105,35 +128,35 @@ where
         .constraints([Constraint::Length(7), Constraint::Min(7)].as_ref())
         .split(size);
 
-    // let title = title();
-    // rect.render_widget(title, chunks[0]);
+    let title = title();
+    rect.render_widget(title, chunks[0]);
 
     let version_chunk = Layout::default()
     .direction(Direction::Vertical)
     .constraints([Constraint::Length(2), Constraint::Min(2)].as_ref())
     .split(chunks[1]);
 
-    // let version = version_block();
-    // rect.render_widget(version, version_chunk[0]);
+    let version = version_block();
+    rect.render_widget(version, version_chunk[0]);
 
     let guideline_chunk = Layout::default()
     .direction(Direction::Vertical)
     .constraints([Constraint::Length(3), Constraint::Min(3)].as_ref())
     .split(version_chunk[1]);
 
-    // let guideline = guideline();
-    // rect.render_widget(guideline, guideline_chunk[0]);
+    let guideline = guideline();
+    rect.render_widget(guideline, guideline_chunk[0]);
 
     let mid_chunk = Layout::default()
     .direction(Direction::Vertical)
     .constraints([Constraint::Length(3), Constraint::Min(3)].as_ref())
     .split(guideline_chunk[1]);
 
-    // let status_block = status_block(app.total_size, app.time_init, app.free_space);
-    // rect.render_widget(status_block, mid_chunk[0]);
+    let status_block = status_block(data);
+    rect.render_widget(status_block, mid_chunk[0]);
 
     let table = table(&data.items);
-    rect.render_widget(table, mid_chunk[1]);
+    rect.render_stateful_widget(table, mid_chunk[1], &mut data.state);
 
     // match &app.data {
     //     Some(data) => {
@@ -162,11 +185,22 @@ where
 
 const ROW_BOTTOM_MARGIN: u16 = 1u16;
 
+fn get_status_cell<'a>(status: &DirStatus) -> Cell<'a> {
+    match status {
+        DirStatus::Ready => Cell::from(status.to_string()).style(Style::default().fg(Color::Green)),
+        DirStatus::Deleting => Cell::from(status.to_string()).style(Style::default().fg(Color::Yellow)),
+        DirStatus::Deleted => Cell::from(status.to_string()).style(Style::default().fg(Color::Green).bg(Color::White)),
+        DirStatus::Error => Cell::from(status.to_string()).style(Style::default().fg(Color::Red)),
+        DirStatus::Loading => Cell::from(status.to_string()).style(Style::default().fg(Color::LightBlue))
+    }
+}
+
 fn table<'a>(items: &Vec<NodeModulePath>) -> Table<'a> {
     let rows: Vec<Row> = items.iter().map(|item| {
         let cells = vec![
             Cell::from(item.path.clone()),
             Cell::from(item.get_size()),
+            get_status_cell(&item.status)
         ];
         Row::new(cells).bottom_margin(ROW_BOTTOM_MARGIN)
     }).collect();
