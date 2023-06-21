@@ -230,15 +230,15 @@ impl Data {
 
 fn main() {
     let start_ms = get_current_time();
-    // let current_path = env::current_dir();
-    let current_path: Result<&std::path::Path, ()> = Ok(Path::new("D:\\personal-projects\\nodejs"));
+    let current_path = env::current_dir();
+    // let current_path: Result<&std::path::Path, ()> = Ok(Path::new("D:\\personal-projects\\nodejs"));
     let data = Arc::new(Mutex::new(Data::new()));
     let share_data = data.clone();
     rayon::scope(move |s| {
         let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
         match current_path {
             Err(err) => {
-                // println!("{err}");
+                println!("{err}");
                 return;
             },
             Ok(path) => {
