@@ -251,11 +251,12 @@ fn main() {
         };
         drop(tx);
         s.spawn(move |_| {
+            let temp_data = share_data.clone();
             rayon::scope(move |t| {
                 for receiver in rx.into_iter() {
-                    if let Ok(mut data_lock) = share_data.lock() {
+                    if let Ok(mut data_lock) = temp_data.lock() {
                         let index = data_lock.add_path(receiver.clone());
-                        let data_clone = share_data.clone();
+                        let data_clone = temp_data.clone();
                         drop(data_lock);
                         t.spawn(move |_| {
                             let bytes = get_dir_size(&receiver);
@@ -265,12 +266,12 @@ fn main() {
                         });
                     }
                 }
+            });
 
-                if let Ok(mut data_lock) = share_data.lock() {
-                    data_lock.finish_search();
-                    drop(data_lock);
-                }
-            })
+            if let Ok(mut data_lock) = share_data.lock() {
+                data_lock.finish_search();
+                drop(data_lock);
+            }
         });
         s.spawn( move |_| {
             let result = start_ui(data.clone());
