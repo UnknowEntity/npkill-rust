@@ -1,15 +1,10 @@
+mod constant;
+
 use tui::{widgets::{Paragraph, Wrap}, layout::Alignment, style::{Style, Color, Modifier}, text::{Spans, Span}};
 
 use crate::Data;
 
-const TITLE: &'static str = r"
-                       __                           __   .__.__  .__   
-_______ __ __  _______/  |_            ____ ______ |  | _|__|  | |  |  
-\_  __ \  |  \/  ___/\   __\  ______  /    \\____ \|  |/ /  |  | |  |  
-|  | \/  |  /\___ \  |  |   /_____/ |   |  \  |_> >    <|  |  |_|  |__
-|__|  |____//____  > |__|           |___|  /   __/|__|_ \__|____/____/
-                 \/                      \/|__|        \/             
-";
+use self::constant::{TITLE, GUIDELINE};
 
 pub fn title<'a>() -> Paragraph<'a> {
     Paragraph::new(TITLE).style(Style::default().fg(Color::White).bg(Color::Black))
@@ -23,10 +18,6 @@ pub fn version_block<'a>() -> Paragraph<'a> {
         .alignment(Alignment::Center)
         .wrap(Wrap { trim: true })
 }
-
-const GUIDELINE: &'static str = r"Select with CURSORS
-Delete with SPACE
-Quit with 'q'";
 
 pub fn guideline<'a>() -> Paragraph<'a> {
     Paragraph::new(GUIDELINE).style(Style::default().bg(Color::Yellow).fg(Color::Black))
