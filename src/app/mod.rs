@@ -1,31 +1,12 @@
-use std::{io::{stdout, Result}, sync::{mpsc::{self, Sender, Receiver}, Mutex, Arc}, time::Duration};
+use std::{io::{stdout, Result}, sync::{mpsc::Receiver, Mutex, Arc}};
 
-use crossterm::event::{self, KeyCode};
 use tui::{backend::{CrosstermBackend, Backend}, Terminal, Frame, layout::{Layout, Direction, Constraint, Rect}, widgets::{Borders, Table, Row, Cell, Block}, style::{Style, Color, Modifier}};
 
-use crate::{NodeModulePath, ui::{title, version_block, guideline, status_block}, DirStatus};
+use crate::{NodeModulePath, ui::{title, version_block, guideline, status_block}, DirStatus, InputEvent};
 
 use super::Data;
 
-enum InputEvent {
-    Quit,
-    Up,
-    Down,
-    Select,
-    Tick,
-}
-
-fn map_input_to_event(input_code: &KeyCode) -> Option<InputEvent> {
-    match input_code {
-        KeyCode::Char('q') => Some(InputEvent::Quit),
-        KeyCode::Up => Some(InputEvent::Up),
-        KeyCode::Down => Some(InputEvent::Down),
-        KeyCode::Char(' ') => Some(InputEvent::Select),
-        _ => None
-    }
-}
-
-pub fn start_ui(data: Arc<Mutex<Data>>) -> Result<()> {
+pub fn start_ui(data: Arc<Mutex<Data>>, rx: &Receiver<InputEvent>) -> Result<()> {
     // Configure Crossterm backend for tui
     let stdout = stdout();
     crossterm::terminal::enable_raw_mode()?;
@@ -33,38 +14,6 @@ pub fn start_ui(data: Arc<Mutex<Data>>) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
     terminal.hide_cursor()?;
-
-    let (tx, rx): (Sender<InputEvent>, Receiver<InputEvent>) = mpsc::channel();
-
-    let event_tx = tx.clone();
-        rayon::spawn(move || {
-            loop {
-                let crossterm_event = match crossterm::event::poll(Duration::from_millis(1000)) {
-                    Ok(result) => result,
-                    Err(err) => {
-                        println!("{err}");
-                        break;
-                    },
-                };
-                if crossterm_event {
-                    if let event::Event::Key(key) = event::read().unwrap() {
-                        if let Some(input_event) = map_input_to_event(&key.code) {
-                            if let Err(err) = event_tx.send(input_event) {
-                                println!("{err}");
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                match event_tx.send(InputEvent::Tick) {
-                    Err(_) => break,
-                    _ => {}
-                }
-            }
-        });
-
-    drop(tx);
     loop {
         let mut data_lock = match data.lock() {
             Ok(data) => data,
@@ -170,18 +119,6 @@ where
     // }
 
 }
-
-// fn draw_title<'a>() -> Paragraph<'a> {
-//     Paragraph::new("Plop with TUI")
-//         .style(Style::default().fg(Color::LightCyan))
-//         .alignment(Alignment::Center)
-//         .block(
-//             Block::default()
-//                 .borders(Borders::ALL)
-//                 .style(Style::default().fg(Color::White))
-//                 .border_type(BorderType::Plain),
-//         )
-// }
 
 const ROW_BOTTOM_MARGIN: u16 = 1u16;
 
