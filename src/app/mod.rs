@@ -26,24 +26,32 @@ pub fn start_ui(data: Arc<Mutex<Data>>, rx: &Receiver<InputEvent>) -> Result<()>
         terminal.draw(|rect| draw(rect, &mut data_lock))?;
         
         drop(data_lock);
-        // TODO handle inputs here
-        if let Ok(input_event) = rx.recv() {
-            let mut data_event = match data.lock() {
-                Ok(data) => data,
-                Err(err) => {
-                    println!("{err}");
-                    break;
-                }
-            };
-            match input_event {
-                InputEvent::Quit => break,
-                InputEvent::Tick => {},
-                InputEvent::Up => data_event.previous(),
-                InputEvent::Down => data_event.next(),
-                InputEvent::Select => {},
+
+        let Ok(input_event) = rx.recv() else {
+            continue;
+        };
+
+        let mut data_event = match data.lock() {
+            Ok(data) => data,
+            Err(err) => {
+                println!("{err}");
+                break;
             }
-            drop(data_event);
+        };
+
+        match input_event {
+            InputEvent::Quit => break,
+            InputEvent::Tick => {},
+            InputEvent::Up => data_event.previous(),
+            InputEvent::Down => data_event.next(),
+            InputEvent::Select => {
+                if let Some(index) = data_event.get_selected() {
+                    data_event.delete_dir(index);
+                }
+            },
         }
+
+        drop(data_event);
     }
 
     // Restore the terminal and close application
@@ -106,18 +114,6 @@ where
 
     let table = table(&data.items);
     rect.render_stateful_widget(table, mid_chunk[1], &mut data.state);
-
-    // match &app.data {
-    //     Some(data) => {
-    //         let table = table(data);
-    //         rect.render_stateful_widget(table, mid_chunk[1], &mut app.state);
-    //     },
-    //     None => {
-    //         let placeholder = table_placeholder();
-    //         rect.render_widget(placeholder, mid_chunk[1]);
-    //     }
-    // }
-
 }
 
 const ROW_BOTTOM_MARGIN: u16 = 1u16;
@@ -136,7 +132,7 @@ fn table<'a>(items: &Vec<NodeModulePath>) -> Table<'a> {
     let rows: Vec<Row> = items.iter().map(|item| {
         let cells = vec![
             Cell::from(item.path.clone()),
-            Cell::from(item.get_size()),
+            Cell::from(item.get_size_string()),
             get_status_cell(&item.status)
         ];
         Row::new(cells).bottom_margin(ROW_BOTTOM_MARGIN)

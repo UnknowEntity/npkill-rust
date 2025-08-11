@@ -11,6 +11,9 @@ use std::sync::mpsc::{Sender, self, Receiver};
 
 use crate::{app::start_ui, background_tasks::run_background_task};
 
+use remove_dir_all::remove_dir_all;
+
+#[derive(PartialEq, Eq)]
 pub enum DirStatus {
     Loading,
     Ready,
@@ -63,12 +66,24 @@ impl NodeModulePath {
         self.status = DirStatus::Error;
     }
 
-    fn get_size(&self) -> String {
+    fn get_size_string(&self) -> String {
         match self.bytes {
             Some(bytes) => size::Size::from_bytes(bytes).to_string(),
             None => "__".to_owned(),
         }
     }
+
+    fn get_size(&self) -> u64 {
+        match self.bytes {
+            Some(bytes) => bytes,
+            None => 0,
+        }
+    }
+}
+
+pub enum DeleteStatus {
+    Deleted(usize),
+    Error(usize),
 }
 
 pub struct Data {
@@ -78,17 +93,19 @@ pub struct Data {
     data_contain: u64,
     start_timestamp: u64,
     end_timestamp: Option<u64>,
+    sender: Sender<DeleteStatus>,
 }
 
 impl Data {
-    fn new() -> Data {
+    fn new(sender: &Sender<DeleteStatus>) -> Data {
         Data { 
             items: vec![], 
             state: TableState::default(), 
             data_free: 0, 
             data_contain: 0, 
             start_timestamp: get_current_time(), 
-            end_timestamp: None 
+            end_timestamp: None,
+            sender: sender.clone(),
         }
     }
 
@@ -122,6 +139,52 @@ impl Data {
             None => "__".to_owned(),
             Some(value) => get_duration_human_time(self.start_timestamp, value)
         }
+    }
+
+    fn delete_dir(&mut self, index: usize) {
+        let Some(data) = self.items.get_mut(index) else {
+            return;
+        };
+
+        if data.status != DirStatus::Ready {
+            return;
+        }
+
+        let path = data.path.clone();
+        let sender = self.sender.clone();
+
+        rayon::spawn(move || {
+            let target_index = index.clone();
+            let sender_result = match remove_dir_all(path) {
+                Ok(_) => sender.send(DeleteStatus::Deleted(target_index)),
+                Err(_) => sender.send(DeleteStatus::Error(target_index)),
+            };
+
+            if let Err(err) = sender_result {
+                println!("{err}");
+            }
+        });
+
+        data.deleting();
+    }
+
+    fn update_delete_file(&mut self, index: usize, is_deleted: bool) {
+        let Some(item) = self.items.get_mut(index) else {
+            return;
+        };
+
+        if !is_deleted {
+            item.error();
+            return;
+        }
+
+        item.deleted();
+        
+        self.data_free += item.get_size();
+    }
+
+    fn get_selected(&self) -> Option<usize> {
+        self.state.selected()
     }
 
     fn next(&mut self) {
@@ -163,9 +226,11 @@ pub enum InputEvent {
 
 fn main() {
     let start_ms = get_current_time();
-    let data = Arc::new(Mutex::new(Data::new()));
+    let (sender, receiver): (Sender<DeleteStatus>, Receiver<DeleteStatus>) = mpsc::channel();
+    let data = Arc::new(Mutex::new(Data::new(&sender)));
     let (tx, rx): (Sender<InputEvent>, Receiver<InputEvent>) = mpsc::channel();
-    run_background_task(&data, &tx);
+    drop(sender);
+    run_background_task(&data, &tx, receiver);
     drop(tx);
     let result = start_ui(data.clone(), &rx);
 
