@@ -2,7 +2,7 @@ use std::{io::{stdout, Result}, sync::{mpsc::Receiver, Mutex, Arc}};
 
 use tui::{backend::{CrosstermBackend, Backend}, Terminal, Frame, layout::{Layout, Direction, Constraint, Rect}, widgets::{Borders, Table, Row, Cell, Block}, style::{Style, Color, Modifier}};
 
-use crate::{NodeModulePath, ui::{title, version_block, guideline, status_block}, DirStatus, InputEvent};
+use crate::{NodeModulePath, ui::{title::title, version_block::version_block, guideline::guideline, status_block::status_block}, DirStatus, InputEvent};
 
 use super::Data;
 
