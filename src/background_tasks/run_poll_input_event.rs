@@ -1,4 +1,5 @@
 use std::{sync::mpsc::Sender, time::Duration};
+use log::error;
 
 use crossterm::event::{self, KeyCode};
 
@@ -25,7 +26,7 @@ pub fn run_poll_input_event(tx: &Sender<InputEvent>) {
         let crossterm_event = match crossterm::event::poll(Duration::from_millis(1000)) {
             Ok(result) => result,
             Err(err) => {
-                println!("{err}");
+                error!("{err}");
                 break;
             }
         };
@@ -40,7 +41,7 @@ pub fn run_poll_input_event(tx: &Sender<InputEvent>) {
             };
 
             if let Err(err) = event_tx.send(input_event) {
-                println!("{err}");
+                error!("{err}");
                 break;
             }
         }

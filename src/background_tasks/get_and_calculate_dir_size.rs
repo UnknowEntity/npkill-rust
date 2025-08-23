@@ -1,9 +1,9 @@
+use log::{error, info};
 use std::{
-    env,
-    sync::{
+    env::{self}, fs, path::PathBuf, sync::{
         mpsc::{self, Receiver, Sender},
         Arc, Mutex,
-    },
+    }
 };
 
 use crate::{
@@ -11,20 +11,50 @@ use crate::{
     Data,
 };
 
-fn get_all_path() -> Option<Receiver<String>> {
-    let current_path = env::current_dir();
-    let (tx_path, rx_path): (Sender<String>, Receiver<String>) = mpsc::channel();
+fn get_all_path(target_path: Option<String>) -> Option<Receiver<String>> {
+    let path = if let Some(input_path) = target_path {
+        match fs::exists(&input_path) {
+            Ok(true) => {},
+            Ok(false) => {
+                error!("Path not exist");
+                return None;
+            },
+            Err(err) => {
+                error!("{err}");
+                return None;
+            }
+        };
 
-    let path = match current_path {
-        Err(err) => {
-            println!("{err}");
+        let metadata = match fs::metadata(&input_path) {
+            Ok(metadata) => metadata,
+            Err(err) => {
+                error!("{err}");
+                return None;
+            }
+        };
+
+        if !metadata.is_dir() {
+            error!("Path is not a dir: {}", input_path);
             return None;
+        };
+
+        PathBuf::from(input_path)
+    } else {
+        match env::current_dir() {
+            Err(err) => {
+                error!("{err}");
+                return None;
+            }
+            Ok(path) => path,
         }
-        Ok(path) => path,
     };
 
+    let (tx_path, rx_path): (Sender<String>, Receiver<String>) = mpsc::channel();
+
     let tx = tx_path.clone();
-    let path = path.to_owned();
+
+    info!("{:?}", path);
+
     rayon::spawn(move || {
         find_node_modules(&path, &tx);
     });
@@ -34,8 +64,8 @@ fn get_all_path() -> Option<Receiver<String>> {
     return Some(rx_path);
 }
 
-pub fn get_and_calculate_dir_size(data: &Arc<Mutex<Data>>) {
-    let Some(rx_path) = get_all_path() else {
+pub fn get_and_calculate_dir_size(data: &Arc<Mutex<Data>>, target_path: Option<String>) {
+    let Some(rx_path) = get_all_path(target_path) else {
         return;
     };
 

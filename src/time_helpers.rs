@@ -1,4 +1,5 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use log::error;
 
 use humantime::format_duration;
 
@@ -9,7 +10,7 @@ pub fn get_current_time() -> u64 {
     match since_the_epoch_result {
         Ok(duration) => duration.as_secs() * 1000 + duration.subsec_nanos() as u64 / 1_000_000,
         Err(err) => {
-            println!("{err}");
+            error!("{err}");
             return 0;
         }
     }

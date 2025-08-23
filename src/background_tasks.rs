@@ -19,8 +19,9 @@ pub fn run_background_task(
     data: &Arc<Mutex<Data>>,
     tx: &Sender<InputEvent>,
     receiver: Receiver<DeleteStatus>,
+    target_path: Option<String>
 ) {
-    get_and_calculate_dir_size(data);
+    get_and_calculate_dir_size(data, target_path);
     run_poll_input_event(tx);
     notify_delete(data, receiver)
 }

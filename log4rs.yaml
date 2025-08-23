@@ -1,0 +1,21 @@
+appenders:
+  rolling_appender:
+    kind: rolling_file
+    path: logs/app.log
+    append: true
+    encoder:
+      kind: pattern
+      pattern: "{d} [{l}] - {t} - {f}:{L} - {m}{n}"
+    policy:
+      kind: compound
+      trigger:
+        kind: size
+        limit: 10 mb
+    # upon reaching the max log size, the file simply gets deleted on successful roll
+      roller:
+        kind: delete
+
+root:
+  level: info
+  appenders:
+    - rolling_appender

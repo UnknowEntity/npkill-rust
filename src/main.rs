@@ -6,8 +6,9 @@ mod background_tasks;
 
 use time_helpers::{get_current_time, get_duration_human_time};
 use ratatui::widgets::TableState;
-use std::{sync::{Arc, Mutex}, fmt};
+use std::{env, fmt, sync::{Arc, Mutex}};
 use std::sync::mpsc::{Sender, self, Receiver};
+use log::{error};
 
 use crate::{app::start_ui, background_tasks::run_background_task};
 
@@ -161,7 +162,7 @@ impl Data {
             };
 
             if let Err(err) = sender_result {
-                println!("{err}");
+                error!("{err}");
             }
         });
 
@@ -225,17 +226,28 @@ pub enum InputEvent {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    
+    log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
+    
     let start_ms = get_current_time();
+
     let (sender, receiver): (Sender<DeleteStatus>, Receiver<DeleteStatus>) = mpsc::channel();
+
     let data = Arc::new(Mutex::new(Data::new(&sender)));
+
     let (tx, rx): (Sender<InputEvent>, Receiver<InputEvent>) = mpsc::channel();
+
     drop(sender);
-    run_background_task(&data, &tx, receiver);
+
+    run_background_task(&data, &tx, receiver, args.last().cloned());
+
     drop(tx);
+
     let result = start_ui(data.clone(), &rx);
 
     if let Err(err) = result {
-        println!("{err}");
+        error!("{err}");
     }
     let end_ms = get_current_time();
 
