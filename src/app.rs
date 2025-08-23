@@ -1,13 +1,13 @@
 use std::{io::{stdout, Result}, sync::{mpsc::Receiver, Mutex, Arc}};
 
-use tui::{backend::{CrosstermBackend, Backend}, Terminal, Frame, layout::{Layout, Direction, Constraint, Rect}, widgets::{Borders, Table, Row, Cell, Block}, style::{Style, Color, Modifier}};
+use ratatui::{backend::{CrosstermBackend}, Terminal, Frame, layout::{Layout, Direction, Constraint, Rect}, widgets::{Borders, Table, Row, Cell, Block}, style::{Style, Color, Modifier}};
 
 use crate::{NodeModulePath, ui::{title::title, version_block::version_block, guideline::guideline, status_block::status_block}, DirStatus, InputEvent};
 
 use super::Data;
 
 pub fn start_ui(data: Arc<Mutex<Data>>, rx: &Receiver<InputEvent>) -> Result<()> {
-    // Configure Crossterm backend for tui
+    // Configure Crossterm backend for ratatui
     let stdout = stdout();
     crossterm::terminal::enable_raw_mode()?;
     let backend = CrosstermBackend::new(stdout);
@@ -72,11 +72,9 @@ fn check_size(rect: &Rect) {
 }
 
 
-pub fn draw<B>(rect: &mut Frame<B>, data: &mut Data)
-where
-    B: Backend,
+pub fn draw(rect: &mut Frame, data: &mut Data)
 {
-    let size = rect.size();
+    let size = rect.area();
 
     check_size(&size);
 
@@ -138,16 +136,15 @@ fn table<'a>(items: &Vec<NodeModulePath>) -> Table<'a> {
         Row::new(cells).bottom_margin(ROW_BOTTOM_MARGIN)
     }).collect();
 
-    Table::new(rows)
+    Table::new(rows,&[
+            Constraint::Percentage(70),
+            Constraint::Percentage(20),
+            Constraint::Percentage(10),
+        ])
         .header(Row::new(vec!["Path", "Size", "Status"])
             .style(Style::default().fg(Color::Cyan))
             .bottom_margin(ROW_BOTTOM_MARGIN)
         )
         .block(Block::default().borders(Borders::ALL))
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-        .widths(&[
-            Constraint::Percentage(70),
-            Constraint::Percentage(20),
-            Constraint::Percentage(10),
-        ])
+        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
 }

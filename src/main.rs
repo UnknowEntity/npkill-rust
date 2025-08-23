@@ -5,7 +5,7 @@ mod time_helpers;
 mod background_tasks;
 
 use time_helpers::{get_current_time, get_duration_human_time};
-use tui::widgets::TableState;
+use ratatui::widgets::TableState;
 use std::{sync::{Arc, Mutex}, fmt};
 use std::sync::mpsc::{Sender, self, Receiver};
 

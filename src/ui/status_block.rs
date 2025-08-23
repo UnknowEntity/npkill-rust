@@ -1,14 +1,11 @@
-use tui::{
-    layout::Alignment,
-    style::{Color, Modifier, Style},
-    text::{Span, Spans},
-    widgets::{Paragraph, Wrap},
+use ratatui::{
+    layout::Alignment, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Paragraph, Wrap}
 };
 
 use crate::Data;
 
-fn info<'a>(field_name: String, value: String) -> Spans<'a> {
-    Spans::from(vec![
+fn info<'a>(field_name: String, value: String) -> Line<'a> {
+    Line::from(vec![
         Span::raw(field_name),
         Span::raw(": "),
         Span::styled(
