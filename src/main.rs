@@ -251,5 +251,5 @@ fn main() {
     }
     let end_ms = get_current_time();
 
-    println!("Time Run: {}", get_duration_human_time(start_ms, end_ms))
+    println!("     Time Run: {}", get_duration_human_time(start_ms, end_ms))
 }
