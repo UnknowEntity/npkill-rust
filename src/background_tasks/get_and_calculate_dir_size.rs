@@ -1,4 +1,4 @@
-use log::{error, info};
+use log::error;
 use std::{
     env::{self}, fs, path::PathBuf, sync::{
         mpsc::{self, Receiver, Sender},
@@ -52,8 +52,6 @@ fn get_all_path(target_path: Option<String>) -> Option<Receiver<String>> {
     let (tx_path, rx_path): (Sender<String>, Receiver<String>) = mpsc::channel();
 
     let tx = tx_path.clone();
-
-    info!("{:?}", path);
 
     rayon::spawn(move || {
         find_node_modules(&path, &tx);
