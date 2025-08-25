@@ -29,6 +29,7 @@ pub fn status_block<'a>(data: &Data) -> Paragraph<'a> {
         info("Time".to_owned(), duration_value),
         info("Free space".to_owned(), free_space_value),
     ];
+
     Paragraph::new(info_block)
         .style(Style::default().bg(Color::Black))
         .alignment(Alignment::Left)
