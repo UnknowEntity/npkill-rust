@@ -4,7 +4,7 @@ use crate::{Data, DeleteStatus};
 
 pub fn notify_delete(data: &Arc<Mutex<Data>>, receiver: Receiver<DeleteStatus>) {
     let share_data = data.clone();
-    rayon::spawn(move || {
+    tokio::spawn(async move {
         for status in receiver {
             let Ok(mut lock_data) = share_data.lock() else {
                 continue;

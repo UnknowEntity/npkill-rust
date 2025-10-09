@@ -1,14 +1,17 @@
 mod app;
-mod ui;
+mod background_tasks;
 mod file_helpers;
 mod time_helpers;
-mod background_tasks;
+mod ui;
 
-use time_helpers::{get_current_time, get_duration_human_time};
+use log::error;
 use ratatui::widgets::TableState;
-use std::{env, fmt, sync::{Arc, Mutex}};
-use std::sync::mpsc::{Sender, self, Receiver};
-use log::{error};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::{
+    env, fmt,
+    sync::{Arc, Mutex},
+};
+use time_helpers::{get_current_time, get_duration_human_time};
 
 use crate::{app::start_ui, background_tasks::run_background_task};
 
@@ -43,7 +46,11 @@ struct NodeModulePath {
 
 impl NodeModulePath {
     fn new(path: String) -> NodeModulePath {
-        NodeModulePath { bytes: None, path, status: DirStatus::Loading }
+        NodeModulePath {
+            bytes: None,
+            path,
+            status: DirStatus::Loading,
+        }
     }
 
     fn update_size(&mut self, byte: u64) {
@@ -99,12 +106,12 @@ pub struct Data {
 
 impl Data {
     fn new(sender: &Sender<DeleteStatus>) -> Data {
-        Data { 
-            items: vec![], 
-            state: TableState::default(), 
-            data_free: 0, 
-            data_contain: 0, 
-            start_timestamp: get_current_time(), 
+        Data {
+            items: vec![],
+            state: TableState::default(),
+            data_free: 0,
+            data_contain: 0,
+            start_timestamp: get_current_time(),
             end_timestamp: None,
             sender: sender.clone(),
         }
@@ -138,7 +145,7 @@ impl Data {
     fn get_search_duration(&self) -> String {
         match self.end_timestamp {
             None => "__".to_owned(),
-            Some(value) => get_duration_human_time(self.start_timestamp, value)
+            Some(value) => get_duration_human_time(self.start_timestamp, value),
         }
     }
 
@@ -154,7 +161,7 @@ impl Data {
         let path = data.path.clone();
         let sender = self.sender.clone();
 
-        rayon::spawn(move || {
+        tokio::spawn(async move {
             let target_index = index.clone();
             let sender_result = match remove_dir_all(path) {
                 Ok(_) => sender.send(DeleteStatus::Deleted(target_index)),
@@ -180,7 +187,7 @@ impl Data {
         }
 
         item.deleted();
-        
+
         self.data_free += item.get_size();
     }
 
@@ -209,7 +216,7 @@ impl Data {
                     self.items.len() - 1
                 } else {
                     i - 1
-                } 
+                }
             }
             None => 0,
         };
@@ -225,11 +232,12 @@ pub enum InputEvent {
     Tick,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     log4rs::init_file("log4rs.yaml", Default::default()).unwrap();
-    
+
     let start_ms = get_current_time();
 
     let (sender, receiver): (Sender<DeleteStatus>, Receiver<DeleteStatus>) = mpsc::channel();
@@ -251,5 +259,8 @@ fn main() {
     }
     let end_ms = get_current_time();
 
-    println!("     Time Run: {}", get_duration_human_time(start_ms, end_ms))
+    println!(
+        "     Time Run: {}",
+        get_duration_human_time(start_ms, end_ms)
+    )
 }

@@ -1,9 +1,12 @@
 use log::error;
 use std::{
-    env::{self}, fs, path::PathBuf, sync::{
+    env::{self},
+    fs,
+    path::PathBuf,
+    sync::{
         mpsc::{self, Receiver, Sender},
         Arc, Mutex,
-    }
+    },
 };
 
 use crate::{
@@ -14,11 +17,11 @@ use crate::{
 fn get_all_path(target_path: Option<String>) -> Option<Receiver<String>> {
     let path = if let Some(input_path) = target_path {
         match fs::exists(&input_path) {
-            Ok(true) => {},
+            Ok(true) => {}
             Ok(false) => {
                 error!("Path not exist");
                 return None;
-            },
+            }
             Err(err) => {
                 error!("{err}");
                 return None;
@@ -53,7 +56,7 @@ fn get_all_path(target_path: Option<String>) -> Option<Receiver<String>> {
 
     let tx = tx_path.clone();
 
-    rayon::spawn(move || {
+    tokio::spawn(async move {
         find_node_modules(&path, &tx);
     });
 
@@ -69,34 +72,34 @@ pub fn get_and_calculate_dir_size(data: &Arc<Mutex<Data>>, target_path: Option<S
 
     let share_data = data.clone();
 
-    rayon::spawn(move || {
-        let temp_data = share_data.clone();
-        rayon::scope(move |t| {
-            for receiver in rx_path.into_iter() {
-                let Ok(mut data_lock) = temp_data.lock() else {
-                    continue;
-                };
+    // tokio::spawn(async move {
+    //     let temp_data = share_data.clone();
+    //     rayon::scope(move |t| {
+    //         for receiver in rx_path.into_iter() {
+    //             let Ok(mut data_lock) = temp_data.lock() else {
+    //                 continue;
+    //             };
 
-                let index = data_lock.add_path(receiver.clone());
-                let data_clone = temp_data.clone();
+    //             let index = data_lock.add_path(receiver.clone());
+    //             let data_clone = temp_data.clone();
 
-                drop(data_lock);
+    //             drop(data_lock);
 
-                t.spawn(move |_| {
-                    let bytes = get_dir_size(&receiver);
+    //             t.spawn(move |_| {
+    //                 let bytes = get_dir_size(&receiver);
 
-                    if let Ok(mut data_lock) = data_clone.lock() {
-                        data_lock.update_size(index, bytes);
-                    }
-                });
-            }
-        });
+    //                 if let Ok(mut data_lock) = data_clone.lock() {
+    //                     data_lock.update_size(index, bytes);
+    //                 }
+    //             });
+    //         }
+    //     });
 
-        let Ok(mut data_lock) = share_data.lock() else {
-            return;
-        };
+    //     let Ok(mut data_lock) = share_data.lock() else {
+    //         return;
+    //     };
 
-        data_lock.finish_search();
-        drop(data_lock);
-    });
+    //     data_lock.finish_search();
+    //     drop(data_lock);
+    // });
 }

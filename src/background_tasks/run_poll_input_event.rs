@@ -1,5 +1,5 @@
-use std::{sync::mpsc::Sender, time::Duration};
 use log::error;
+use std::{sync::mpsc::Sender, time::Duration};
 
 use crossterm::event::{self, KeyCode};
 
@@ -17,32 +17,34 @@ fn map_input_to_event(input_code: &KeyCode) -> Option<InputEvent> {
 
 pub fn run_poll_input_event(tx: &Sender<InputEvent>) {
     let event_tx = tx.clone();
-    rayon::spawn(move || loop {
-        match event_tx.send(InputEvent::Tick) {
-            Err(_) => break,
-            _ => {}
-        }
-
-        let crossterm_event = match crossterm::event::poll(Duration::from_millis(1000)) {
-            Ok(result) => result,
-            Err(err) => {
-                error!("{err}");
-                break;
+    tokio::spawn(async move {
+        loop {
+            match event_tx.send(InputEvent::Tick) {
+                Err(_) => break,
+                _ => {}
             }
-        };
 
-        if crossterm_event {
-            let Ok(event::Event::Key(key)) = event::read() else {
-                continue;
+            let crossterm_event = match crossterm::event::poll(Duration::from_millis(1000)) {
+                Ok(result) => result,
+                Err(err) => {
+                    error!("{err}");
+                    break;
+                }
             };
 
-            let Some(input_event) = map_input_to_event(&key.code) else {
-                continue;
-            };
+            if crossterm_event {
+                let Ok(event::Event::Key(key)) = event::read() else {
+                    continue;
+                };
 
-            if let Err(err) = event_tx.send(input_event) {
-                error!("{err}");
-                break;
+                let Some(input_event) = map_input_to_event(&key.code) else {
+                    continue;
+                };
+
+                if let Err(err) = event_tx.send(input_event) {
+                    error!("{err}");
+                    break;
+                }
             }
         }
     });
