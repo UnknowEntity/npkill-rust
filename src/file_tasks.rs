@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use log::{error, info};
-use tokio::fs::{read_dir, remove_dir, remove_file};
+use tokio::fs::{read_dir, remove_dir, remove_file, symlink_metadata};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc::Sender;
 
@@ -42,6 +42,18 @@ pub async fn find_node_modules(
                 temp_dir = vec![];
                 continue;
             }
+
+            match symlink_metadata(dir_entry.path()).await {
+                Ok(symlink_metadata) => {
+                    if symlink_metadata.is_symlink() {
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    error!("{err}");
+                    continue;
+                }
+            };
 
             if dir_entry.path().is_dir() {
                 temp_dir.push(dir_entry.path());
@@ -89,6 +101,18 @@ pub async fn calculate_dir_size(
                 total_size += file_size;
             }
 
+            match symlink_metadata(dir_entry.path()).await {
+                Ok(symlink_metadata) => {
+                    if symlink_metadata.is_symlink() {
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    error!("{err}");
+                    continue;
+                }
+            };
+
             if dir_entry.path().is_dir() {
                 paths.push(dir_entry.path());
             }
@@ -118,6 +142,18 @@ pub async fn delete_dir(shutdown_rx: &mut Receiver<bool>, target_path: PathBuf) 
             if dir_entry.path().is_file() {
                 remove_file(dir_entry.path()).await?;
             }
+
+            match symlink_metadata(dir_entry.path()).await {
+                Ok(symlink_metadata) => {
+                    if symlink_metadata.is_symlink() {
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    error!("{err}");
+                    continue;
+                }
+            };
 
             if dir_entry.path().is_dir() {
                 paths.push(dir_entry.path());
