@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use log::{error, info};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::{
+    broadcast,
+    mpsc::{channel, Receiver, Sender},
+};
 
 use crate::{
     command::HandlerCommand,
@@ -11,6 +14,7 @@ use crate::{
 };
 
 pub async fn command_handlers(
+    shutdown_tx: &broadcast::Sender<bool>,
     command_rx: &mut Receiver<HandlerCommand>,
     event_tx: &Sender<HandlerEvent>,
 ) -> Result<()> {
@@ -21,20 +25,18 @@ pub async fn command_handlers(
 
         match command {
             HandlerCommand::FindNodeModules(path) => {
-                info!("Initial Path: {:?}", path);
                 let event_tx = event_tx.clone();
+                let mut shutdown_rx = shutdown_tx.subscribe();
                 tokio::spawn(async move {
                     let (tx, mut rx) = channel::<PathBuf>(100);
 
                     tokio::spawn(async move {
-                        if let Err(err) = find_node_modules(path, &tx).await {
+                        if let Err(err) = find_node_modules(&mut shutdown_rx, path, &tx).await {
                             error!("{err}");
                         }
-                        info!("Finished searching - Drop tx");
                     });
 
                     while let Some(dir) = rx.recv().await {
-                        info!("node_modules found: {:?}", dir);
                         if let Err(err) = event_tx.send(HandlerEvent::FindDir(dir)).await {
                             error!("{err}");
                         }
@@ -47,8 +49,9 @@ pub async fn command_handlers(
             }
             HandlerCommand::GetDirSize(index, path) => {
                 let event_tx = event_tx.clone();
+                let mut shutdown_rx = shutdown_tx.subscribe();
                 tokio::spawn(async move {
-                    let result = calculate_dir_size(path).await;
+                    let result = calculate_dir_size(&mut shutdown_rx, path).await;
 
                     if let Err(err) = event_tx.send(HandlerEvent::FileSize(index, result)).await {
                         error!("{err}");
@@ -57,8 +60,9 @@ pub async fn command_handlers(
             }
             HandlerCommand::DeleteDir(index, path) => {
                 let event_tx = event_tx.clone();
+                let mut shutdown_rx = shutdown_tx.subscribe();
                 tokio::spawn(async move {
-                    let result = delete_dir(path).await;
+                    let result = delete_dir(&mut shutdown_rx, path).await;
 
                     if let Err(err) = event_tx
                         .send(HandlerEvent::FileDeleted(index, result))
@@ -68,7 +72,15 @@ pub async fn command_handlers(
                     };
                 });
             }
-            HandlerCommand::Quit => return Ok(()),
+            HandlerCommand::Quit => {
+                if let Err(err) = shutdown_tx.send(true) {
+                    error!("{err}");
+                };
+                info!("Gracefully shutdown backend");
+                break;
+            }
         }
     }
+
+    return Ok(());
 }

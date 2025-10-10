@@ -4,9 +4,14 @@ use std::path::PathBuf;
 use anyhow::Result;
 use log::{error, info};
 use tokio::fs::{read_dir, remove_dir, remove_file};
+use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc::Sender;
 
-pub async fn find_node_modules(path: PathBuf, tx: &Sender<PathBuf>) -> Result<()> {
+pub async fn find_node_modules(
+    shutdown_rx: &mut Receiver<bool>,
+    path: PathBuf,
+    tx: &Sender<PathBuf>,
+) -> Result<()> {
     if !path.is_dir() {
         return Ok(());
     }
@@ -14,6 +19,11 @@ pub async fn find_node_modules(path: PathBuf, tx: &Sender<PathBuf>) -> Result<()
     let mut paths: Vec<PathBuf> = vec![path];
 
     while let Some(entry) = paths.pop() {
+        if shutdown_rx.try_recv().is_ok_and(|signal| signal) {
+            info!("Gracefully shutdown find_node_modules");
+            return Ok(());
+        }
+
         if entry.file_name().unwrap_or(OsStr::new("")) == "node_modules" {
             match tx.send(entry).await {
                 Ok(_) => {}
@@ -26,13 +36,10 @@ pub async fn find_node_modules(path: PathBuf, tx: &Sender<PathBuf>) -> Result<()
 
         let mut temp_dir: Vec<PathBuf> = vec![];
 
-        info!("Root: {:?}", entry);
-
         while let Some(dir_entry) = read_dir.next_entry().await? {
             if dir_entry.path().is_dir() && dir_entry.file_name().as_os_str() == "node_modules" {
                 tx.send(dir_entry.path()).await?;
                 temp_dir = vec![];
-                info!("Branch: {:?}", dir_entry.path());
                 continue;
             }
 
@@ -46,12 +53,13 @@ pub async fn find_node_modules(path: PathBuf, tx: &Sender<PathBuf>) -> Result<()
         }
     }
 
-    info!("Finish paths");
-
     Ok(())
 }
 
-pub async fn calculate_dir_size(target_path: PathBuf) -> Result<u64> {
+pub async fn calculate_dir_size(
+    shutdown_rx: &mut Receiver<bool>,
+    target_path: PathBuf,
+) -> Result<u64> {
     let mut total_size: u64 = 0;
 
     if target_path.is_file() {
@@ -61,7 +69,13 @@ pub async fn calculate_dir_size(target_path: PathBuf) -> Result<u64> {
     let mut paths: Vec<PathBuf> = vec![target_path];
 
     while let Some(entry) = paths.pop() {
+        if shutdown_rx.try_recv().is_ok_and(|signal| signal) {
+            info!("Gracefully shutdown calculate_dir_size");
+            return Ok(0);
+        }
+
         let mut read_dir = read_dir(entry.as_path()).await?;
+
         while let Some(dir_entry) = read_dir.next_entry().await? {
             if dir_entry.path().is_file() {
                 let file_size = match dir_entry.path().metadata() {
@@ -84,7 +98,7 @@ pub async fn calculate_dir_size(target_path: PathBuf) -> Result<u64> {
     return Ok(total_size);
 }
 
-pub async fn delete_dir(target_path: PathBuf) -> Result<()> {
+pub async fn delete_dir(shutdown_rx: &mut Receiver<bool>, target_path: PathBuf) -> Result<()> {
     if target_path.is_file() {
         remove_file(target_path).await?;
         return Ok(());
@@ -94,6 +108,11 @@ pub async fn delete_dir(target_path: PathBuf) -> Result<()> {
     let mut clean_up_dirs: Vec<PathBuf> = vec![];
 
     while let Some(entry) = paths.pop() {
+        if shutdown_rx.try_recv().is_ok_and(|signal| signal) {
+            info!("Gracefully shutdown delete_dir");
+            return Ok(());
+        }
+
         let mut read_dir = read_dir(entry.as_path()).await?;
         while let Some(dir_entry) = read_dir.next_entry().await? {
             if dir_entry.path().is_file() {

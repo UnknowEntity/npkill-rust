@@ -2,7 +2,7 @@ use std::{fmt, io::stdout, path::PathBuf, time::Duration};
 
 use anyhow::Result;
 use crossterm::event::{self, KeyCode};
-use log::{error, info};
+use log::error;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -142,10 +142,6 @@ impl Data {
 
     fn finish_search(&mut self) {
         self.end_timestamp = Some(get_current_time());
-        info!(
-            "Finish Search: {:?}",
-            self.end_timestamp.unwrap_or_default()
-        );
     }
 
     fn get_search_duration(&self) -> String {

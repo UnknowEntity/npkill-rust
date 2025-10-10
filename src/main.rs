@@ -9,7 +9,7 @@ mod ui;
 use log::error;
 use std::env;
 use time_helpers::{get_current_time, get_duration_human_time};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::app::start_ui;
 use crate::command::HandlerCommand;
@@ -26,9 +26,10 @@ async fn main() {
 
     let (command_tx, mut command_rx) = mpsc::channel::<HandlerCommand>(100);
     let (event_tx, mut event_rx) = mpsc::channel::<HandlerEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<bool>(10);
 
     tokio::spawn(async move {
-        if let Err(err) = command_handlers(&mut command_rx, &event_tx).await {
+        if let Err(err) = command_handlers(&shutdown_tx, &mut command_rx, &event_tx).await {
             error!("{err}");
         };
     });
