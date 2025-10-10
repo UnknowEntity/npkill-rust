@@ -47,6 +47,10 @@ struct NodeModulePath {
     bytes: Option<u64>,
     path: PathBuf,
     status: DirStatus,
+    start_timestamp: u64,
+    get_sized_timestamp: Option<u64>,
+    delete_start_timestamp: Option<u64>,
+    delete_end_timestamp: Option<u64>,
 }
 
 impl NodeModulePath {
@@ -55,20 +59,27 @@ impl NodeModulePath {
             bytes: None,
             path,
             status: DirStatus::Loading,
+            start_timestamp: get_current_time(),
+            get_sized_timestamp: None,
+            delete_start_timestamp: None,
+            delete_end_timestamp: None,
         }
     }
 
     fn update_size(&mut self, byte: u64) {
         self.bytes = Some(byte);
         self.status = DirStatus::Ready;
+        self.get_sized_timestamp = Some(get_current_time());
     }
 
     fn deleting(&mut self) {
         self.status = DirStatus::Deleting;
+        self.delete_start_timestamp = Some(get_current_time());
     }
 
     fn deleted(&mut self) -> u64 {
         self.status = DirStatus::Deleted;
+        self.delete_end_timestamp = Some(get_current_time());
         match self.bytes {
             Some(value) => value,
             None => 0,
@@ -95,6 +106,25 @@ impl NodeModulePath {
 
     fn get_path(&self) -> String {
         return self.path.display().to_string();
+    }
+
+    fn get_size_duration(&self) -> String {
+        match self.get_sized_timestamp {
+            None => "__".to_owned(),
+            Some(value) => get_duration_human_time(self.start_timestamp, value),
+        }
+    }
+
+    fn get_delete_duration(&self) -> String {
+        let Some(delete_start_timestamp) = self.delete_start_timestamp else {
+            return "__".to_owned();
+        };
+
+        let Some(delete_end_timestamp) = self.delete_end_timestamp else {
+            return "__".to_owned();
+        };
+
+        get_duration_human_time(delete_start_timestamp, delete_end_timestamp)
     }
 }
 
@@ -389,6 +419,8 @@ fn table<'a>(items: &Vec<NodeModulePath>) -> Table<'a> {
         .map(|item| {
             let cells = vec![
                 Cell::from(item.get_path().clone()),
+                Cell::from(item.get_size_duration()),
+                Cell::from(item.get_delete_duration()),
                 Cell::from(item.get_size_string()),
                 get_status_cell(&item.status),
             ];
@@ -399,13 +431,15 @@ fn table<'a>(items: &Vec<NodeModulePath>) -> Table<'a> {
     Table::new(
         rows,
         &[
-            Constraint::Percentage(70),
-            Constraint::Percentage(20),
+            Constraint::Percentage(60),
+            Constraint::Percentage(10),
+            Constraint::Percentage(10),
+            Constraint::Percentage(10),
             Constraint::Percentage(10),
         ],
     )
     .header(
-        Row::new(vec!["Path", "Size", "Status"])
+        Row::new(vec!["Path", "Search Time", "Delete Time", "Size", "Status"])
             .style(Style::default().fg(Color::Cyan))
             .bottom_margin(ROW_BOTTOM_MARGIN),
     )
