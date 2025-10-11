@@ -567,7 +567,7 @@ checksum = "dce6dd36094cac388f119d2e9dc82dc730ef91c32a6222170d630e5414b956e6"
 
 [[package]]
 name = "npkill-rust"
-version = "0.15.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "crossterm 0.29.0",

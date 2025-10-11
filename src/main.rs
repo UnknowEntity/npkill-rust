@@ -26,7 +26,7 @@ async fn main() {
 
     let (command_tx, mut command_rx) = mpsc::channel::<HandlerCommand>(100);
     let (event_tx, mut event_rx) = mpsc::channel::<HandlerEvent>(100);
-    let (shutdown_tx, _) = broadcast::channel::<bool>(10);
+    let (shutdown_tx, _) = broadcast::channel::<bool>(100);
 
     tokio::spawn(async move {
         if let Err(err) = command_handlers(&shutdown_tx, &mut command_rx, &event_tx).await {

@@ -284,7 +284,10 @@ pub async fn start_ui(
                 },
                 HandlerEvent::FileDeleted(index, result) => match result {
                     Ok(_) => data.update_delete_file(index, true),
-                    Err(err) => error!("{err}"),
+                    Err(err) => {
+                        error!("{err}");
+                        data.update_delete_file(index, false)
+                    }
                 },
             }
         }

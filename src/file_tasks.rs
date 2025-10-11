@@ -147,7 +147,11 @@ pub async fn delete_dir(shutdown_rx: &mut Receiver<bool>, target_path: PathBuf) 
             match symlink_metadata(dir_entry.path()).await {
                 Ok(symlink_metadata) => {
                     if symlink_metadata.is_symlink() {
-                        remove_dir(dir_entry.path()).await?;
+                        if symlink_metadata.is_dir() {
+                            remove_dir(dir_entry.path()).await?;
+                        } else {
+                            remove_file(dir_entry.path()).await?;
+                        }
                         continue;
                     }
                 }
