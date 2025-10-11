@@ -147,11 +147,16 @@ pub async fn delete_dir(shutdown_rx: &mut Receiver<bool>, target_path: PathBuf) 
             match symlink_metadata(dir_entry.path()).await {
                 Ok(symlink_metadata) => {
                     if symlink_metadata.is_symlink() {
-                        if symlink_metadata.is_dir() {
-                            remove_dir(dir_entry.path()).await?;
-                        } else {
-                            remove_file(dir_entry.path()).await?;
-                        }
+                        match remove_file(dir_entry.path()).await {
+                            Ok(_) => {}
+                            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                                // Try as directory symlink
+                                remove_dir(dir_entry.path()).await?;
+                            }
+                            Err(e) => {
+                                return Err(e.into());
+                            }
+                        };
                         continue;
                     }
                 }
