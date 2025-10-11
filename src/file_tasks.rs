@@ -89,18 +89,6 @@ pub async fn calculate_dir_size(
         let mut read_dir = read_dir(entry.as_path()).await?;
 
         while let Some(dir_entry) = read_dir.next_entry().await? {
-            if dir_entry.path().is_file() {
-                let file_size = match dir_entry.path().metadata() {
-                    Ok(metadata) => metadata.len(),
-                    Err(err) => {
-                        error!("{err}");
-                        0
-                    }
-                };
-
-                total_size += file_size;
-            }
-
             match symlink_metadata(dir_entry.path()).await {
                 Ok(symlink_metadata) => {
                     if symlink_metadata.is_symlink() {
@@ -112,6 +100,18 @@ pub async fn calculate_dir_size(
                     continue;
                 }
             };
+
+            if dir_entry.path().is_file() {
+                let file_size = match dir_entry.path().metadata() {
+                    Ok(metadata) => metadata.len(),
+                    Err(err) => {
+                        error!("{err}");
+                        0
+                    }
+                };
+
+                total_size += file_size;
+            }
 
             if dir_entry.path().is_dir() {
                 paths.push(dir_entry.path());
@@ -138,6 +138,7 @@ pub async fn delete_dir(shutdown_rx: &mut Receiver<bool>, target_path: PathBuf) 
         }
 
         let mut read_dir = read_dir(entry.as_path()).await?;
+
         while let Some(dir_entry) = read_dir.next_entry().await? {
             if dir_entry.path().is_file() {
                 remove_file(dir_entry.path()).await?;
@@ -146,6 +147,7 @@ pub async fn delete_dir(shutdown_rx: &mut Receiver<bool>, target_path: PathBuf) 
             match symlink_metadata(dir_entry.path()).await {
                 Ok(symlink_metadata) => {
                     if symlink_metadata.is_symlink() {
+                        remove_dir(dir_entry.path()).await?;
                         continue;
                     }
                 }
