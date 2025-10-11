@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use log::{error, info};
-use tokio::fs::{read_dir, remove_dir, remove_file, symlink_metadata};
+use tokio::fs::{read_dir, remove_dir, remove_file};
 use tokio::sync::broadcast::Receiver;
 use tokio::sync::mpsc::Sender;
 
@@ -37,25 +37,19 @@ pub async fn find_node_modules(
         let mut temp_dir: Vec<PathBuf> = vec![];
 
         while let Some(dir_entry) = read_dir.next_entry().await? {
-            if dir_entry.path().is_dir() && dir_entry.file_name().as_os_str() == "node_modules" {
-                tx.send(dir_entry.path()).await?;
-                temp_dir = vec![];
+            let file_type = dir_entry.file_type().await?;
+
+            if file_type.is_symlink() {
                 continue;
             }
 
-            match symlink_metadata(dir_entry.path()).await {
-                Ok(symlink_metadata) => {
-                    if symlink_metadata.is_symlink() {
-                        continue;
-                    }
-                }
-                Err(err) => {
-                    error!("{err}");
-                    continue;
-                }
-            };
+            if file_type.is_dir() && dir_entry.file_name().as_os_str() == "node_modules" {
+                tx.send(dir_entry.path()).await?;
+                temp_dir = vec![];
+                break;
+            }
 
-            if dir_entry.path().is_dir() {
+            if file_type.is_dir() {
                 temp_dir.push(dir_entry.path());
             }
         }
@@ -89,19 +83,13 @@ pub async fn calculate_dir_size(
         let mut read_dir = read_dir(entry.as_path()).await?;
 
         while let Some(dir_entry) = read_dir.next_entry().await? {
-            match symlink_metadata(dir_entry.path()).await {
-                Ok(symlink_metadata) => {
-                    if symlink_metadata.is_symlink() {
-                        continue;
-                    }
-                }
-                Err(err) => {
-                    error!("{err}");
-                    continue;
-                }
-            };
+            let file_type = dir_entry.file_type().await?;
 
-            if dir_entry.path().is_file() {
+            if file_type.is_symlink() {
+                continue;
+            }
+
+            if file_type.is_file() {
                 let file_size = match dir_entry.path().metadata() {
                     Ok(metadata) => metadata.len(),
                     Err(err) => {
@@ -113,7 +101,7 @@ pub async fn calculate_dir_size(
                 total_size += file_size;
             }
 
-            if dir_entry.path().is_dir() {
+            if file_type.is_dir() {
                 paths.push(dir_entry.path());
             }
         }
@@ -140,31 +128,25 @@ pub async fn delete_dir(shutdown_rx: &mut Receiver<bool>, target_path: PathBuf) 
         let mut read_dir = read_dir(entry.as_path()).await?;
 
         while let Some(dir_entry) = read_dir.next_entry().await? {
-            if dir_entry.path().is_file() {
-                remove_file(dir_entry.path()).await?;
+            let file_type = dir_entry.file_type().await?;
+
+            if file_type.is_symlink() {
+                match remove_file(dir_entry.path()).await {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                        // Try as directory symlink
+                        remove_dir(dir_entry.path()).await?;
+                    }
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                };
+                continue;
             }
 
-            match symlink_metadata(dir_entry.path()).await {
-                Ok(symlink_metadata) => {
-                    if symlink_metadata.is_symlink() {
-                        match remove_file(dir_entry.path()).await {
-                            Ok(_) => {}
-                            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                                // Try as directory symlink
-                                remove_dir(dir_entry.path()).await?;
-                            }
-                            Err(e) => {
-                                return Err(e.into());
-                            }
-                        };
-                        continue;
-                    }
-                }
-                Err(err) => {
-                    error!("{err}");
-                    continue;
-                }
-            };
+            if file_type.is_file() {
+                remove_file(dir_entry.path()).await?;
+            }
 
             if dir_entry.path().is_dir() {
                 paths.push(dir_entry.path());
