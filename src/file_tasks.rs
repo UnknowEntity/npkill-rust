@@ -1,163 +1,152 @@
 use std::ffi::OsStr;
+use std::fs::read_dir;
+use std::fs::remove_dir;
+use std::fs::remove_file;
+use std::fs::DirEntry;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use anyhow::Result;
-use log::{error, info};
-use tokio::fs::{read_dir, remove_dir, remove_file};
-use tokio::sync::broadcast::Receiver;
-use tokio::sync::mpsc::Sender;
+use crossbeam::channel::Sender;
+use log::error;
+use rayon::iter::ParallelBridge;
+use rayon::iter::ParallelIterator;
+use walkdir::WalkDir;
 
-pub async fn find_node_modules(
-    shutdown_rx: &mut Receiver<bool>,
-    path: PathBuf,
-    tx: &Sender<PathBuf>,
-) -> Result<()> {
+pub fn find_node_modules(path: PathBuf, tx: &Sender<PathBuf>) -> Result<()> {
     if !path.is_dir() {
         return Ok(());
     }
 
-    let mut paths: Vec<PathBuf> = vec![path];
+    if path.file_name().unwrap_or(OsStr::new("")) == "node_modules" {
+        match tx.send(path) {
+            Ok(_) => {}
+            Err(err) => error!("{err}"),
+        };
+        return Ok(());
+    }
 
-    while let Some(entry) = paths.pop() {
-        if shutdown_rx.try_recv().is_ok_and(|signal| signal) {
-            info!("Gracefully shutdown find_node_modules");
-            return Ok(());
-        }
+    let mut dirs: Vec<PathBuf> = vec![];
 
-        if entry.file_name().unwrap_or(OsStr::new("")) == "node_modules" {
-            match tx.send(entry).await {
-                Ok(_) => {}
-                Err(err) => error!("{err}"),
-            };
+    for entry in read_dir(path.as_path())? {
+        let dir_entry: DirEntry = entry?;
+
+        let file_type = dir_entry.file_type()?;
+
+        if file_type.is_symlink() {
             continue;
         }
 
-        let mut read_dir = read_dir(entry.as_path()).await?;
-
-        let mut temp_dir: Vec<PathBuf> = vec![];
-
-        while let Some(dir_entry) = read_dir.next_entry().await? {
-            let file_type = dir_entry.file_type().await?;
-
-            if file_type.is_symlink() {
-                continue;
-            }
-
-            if file_type.is_dir() && dir_entry.file_name().as_os_str() == "node_modules" {
-                tx.send(dir_entry.path()).await?;
-                temp_dir = vec![];
-                break;
-            }
-
-            if file_type.is_dir() {
-                temp_dir.push(dir_entry.path());
-            }
+        if file_type.is_dir() && dir_entry.file_name().as_os_str() == "node_modules" {
+            tx.send(dir_entry.path())?;
+            return Ok(());
         }
 
-        if !temp_dir.is_empty() {
-            paths.append(&mut temp_dir);
+        if file_type.is_dir() {
+            dirs.push(dir_entry.path());
         }
+    }
+
+    for dir in dirs {
+        let tx_clone = tx.clone();
+        rayon::spawn(move || {
+            if let Err(err) = find_node_modules(dir, &tx_clone) {
+                error!("{err}");
+            }
+        });
     }
 
     Ok(())
 }
 
-pub async fn calculate_dir_size(
-    shutdown_rx: &mut Receiver<bool>,
-    target_path: PathBuf,
-) -> Result<u64> {
-    let mut total_size: u64 = 0;
-
-    if target_path.is_file() {
-        return Ok(target_path.metadata()?.len());
-    }
-
-    let mut paths: Vec<PathBuf> = vec![target_path];
-
-    while let Some(entry) = paths.pop() {
-        if shutdown_rx.try_recv().is_ok_and(|signal| signal) {
-            info!("Gracefully shutdown calculate_dir_size");
-            return Ok(0);
-        }
-
-        let mut read_dir = read_dir(entry.as_path()).await?;
-
-        while let Some(dir_entry) = read_dir.next_entry().await? {
-            let file_type = dir_entry.file_type().await?;
-
-            if file_type.is_symlink() {
-                continue;
+pub fn compute_total_size(shutdown: &Arc<AtomicBool>, root: PathBuf) -> Result<u64> {
+    let total: u64 = WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .par_bridge() // stream the iterator into Rayon threads
+        .filter_map(|entry_res| match entry_res {
+            Ok(entry) => Some(entry),
+            Err(err) => {
+                error!("{err}");
+                None
+            } // you can log errors instead of dropping
+        })
+        .take_any_while(|_| !shutdown.load(Ordering::Relaxed))
+        .map(|entry| {
+            // get metadata (blocking) and return size or 0 on error
+            match entry.metadata() {
+                Ok(m) if m.is_file() => m.len(),
+                _ => 0,
             }
+        })
+        .sum();
 
-            if file_type.is_file() {
-                let file_size = match dir_entry.path().metadata() {
-                    Ok(metadata) => metadata.len(),
-                    Err(err) => {
-                        error!("{err}");
-                        0
-                    }
-                };
-
-                total_size += file_size;
-            }
-
-            if file_type.is_dir() {
-                paths.push(dir_entry.path());
-            }
-        }
-    }
-
-    return Ok(total_size);
+    Ok(total)
 }
 
-pub async fn delete_dir(shutdown_rx: &mut Receiver<bool>, target_path: PathBuf) -> Result<()> {
-    if target_path.is_file() {
-        remove_file(target_path).await?;
-        return Ok(());
-    }
+pub fn delete_dir(shutdown: &Arc<AtomicBool>, target_path: PathBuf) -> Result<()> {
+    let read_dir = read_dir(target_path.as_path())?;
 
-    let mut paths: Vec<PathBuf> = vec![target_path];
-    let mut clean_up_dirs: Vec<PathBuf> = vec![];
+    rayon::scope(|s| {
+        for entry in read_dir {
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
 
-    while let Some(entry) = paths.pop() {
-        if shutdown_rx.try_recv().is_ok_and(|signal| signal) {
-            info!("Gracefully shutdown delete_dir");
-            return Ok(());
-        }
+            let shutdown_clone = shutdown.clone();
 
-        let mut read_dir = read_dir(entry.as_path()).await?;
-
-        while let Some(dir_entry) = read_dir.next_entry().await? {
-            let file_type = dir_entry.file_type().await?;
-
-            if file_type.is_symlink() {
-                match remove_file(dir_entry.path()).await {
-                    Ok(_) => {}
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                        // Try as directory symlink
-                        remove_dir(dir_entry.path()).await?;
-                    }
-                    Err(e) => {
-                        return Err(e.into());
+            s.spawn(move |_| {
+                let dir_entry: DirEntry = match entry {
+                    Ok(entry) => entry,
+                    Err(err) => {
+                        error!("{err}");
+                        return;
                     }
                 };
-                continue;
-            }
 
-            if file_type.is_file() {
-                remove_file(dir_entry.path()).await?;
-            }
+                let file_type = match dir_entry.file_type() {
+                    Ok(file_type) => file_type,
+                    Err(err) => {
+                        error!("{err}");
+                        return;
+                    }
+                };
 
-            if dir_entry.path().is_dir() {
-                paths.push(dir_entry.path());
-            }
+                if file_type.is_symlink() {
+                    match remove_file(dir_entry.path()) {
+                        Ok(_) => {}
+                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                            // Try as directory symlink
+                            if let Err(err) = remove_dir(dir_entry.path()) {
+                                error!("{err}");
+                            }
+                        }
+                        Err(err) => error!("{err}"),
+                    };
+
+                    return;
+                }
+
+                if file_type.is_file() {
+                    if let Err(err) = remove_file(dir_entry.path()) {
+                        error!("{err}");
+                    }
+
+                    return;
+                }
+
+                if file_type.is_dir() {
+                    if let Err(err) = delete_dir(&shutdown_clone, dir_entry.path()) {
+                        error!("{err}");
+                    };
+                }
+            });
         }
-        clean_up_dirs.push(entry);
-    }
+    });
 
-    while let Some(dir) = clean_up_dirs.pop() {
-        remove_dir(dir).await?;
-    }
+    remove_dir(target_path)?;
 
     return Ok(());
 }

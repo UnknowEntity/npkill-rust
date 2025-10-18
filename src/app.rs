@@ -1,6 +1,7 @@
 use std::{fmt, io::stdout, path::PathBuf, time::Duration};
 
 use anyhow::Result;
+use crossbeam::channel::{Receiver, Sender};
 use crossterm::event::{self, KeyCode};
 use log::error;
 use ratatui::{
@@ -10,7 +11,6 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Row, Table, TableState},
     Frame, Terminal,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::{
     command::HandlerCommand,
@@ -243,13 +243,12 @@ impl Data {
     }
 }
 
-pub async fn start_ui(
+pub fn start_ui(
     target_path: String,
     tx: &Sender<HandlerCommand>,
     rx: &mut Receiver<HandlerEvent>,
 ) -> Result<()> {
-    tx.send(HandlerCommand::FindNodeModules(PathBuf::from(target_path)))
-        .await?;
+    tx.send(HandlerCommand::FindNodeModules(PathBuf::from(target_path)))?;
 
     let mut data = Data::new();
     // Configure Crossterm backend for ratatui
@@ -273,7 +272,7 @@ pub async fn start_ui(
             match handler_event {
                 HandlerEvent::FindDir(path) => {
                     let index = data.add_path(path.clone());
-                    if let Err(err) = tx.send(HandlerCommand::GetDirSize(index, path)).await {
+                    if let Err(err) = tx.send(HandlerCommand::GetDirSize(index, path)) {
                         error!("{err}");
                     };
                 }
@@ -307,7 +306,7 @@ pub async fn start_ui(
 
             match key.code {
                 KeyCode::Char('q') => {
-                    if let Err(err) = tx.send(HandlerCommand::Quit).await {
+                    if let Err(err) = tx.send(HandlerCommand::Quit) {
                         error!("{err}");
                     };
                     break;
@@ -317,9 +316,8 @@ pub async fn start_ui(
                 KeyCode::Char(' ') => {
                     if let Some(index) = data.get_selected() {
                         if let Some(path) = data.delete_dir_path(index) {
-                            if let Err(err) = tx
-                                .send(HandlerCommand::DeleteDir(index, path.clone()))
-                                .await
+                            if let Err(err) =
+                                tx.send(HandlerCommand::DeleteDir(index, path.clone()))
                             {
                                 error!("{err}");
                             }
